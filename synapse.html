@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#05060b" />
+<meta name="description" content="NEUROBYTE connectome — the navigation menu is a neural cluster; light a node and ride the spike to the next page." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2305060b'/%3E%3Cg stroke='%2335c9e6' stroke-width='1.4' fill='none'%3E%3Cline x1='16' y1='16' x2='4' y2='7'/%3E%3Cline x1='16' y1='16' x2='28' y2='6'/%3E%3Cline x1='16' y1='16' x2='27' y2='24'/%3E%3Cline x1='16' y1='16' x2='6' y2='26'/%3E%3Cline x1='16' y1='16' x2='16' y2='30'/%3E%3C/g%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%2382e6ff'/%3E%3C/svg%3E" />
+<title>NEUROBYTE — connectome</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #05060b; }
+  body { font-family: "SFMono-Regular", ui-monospace, "Courier New", monospace; -webkit-font-smoothing: antialiased; }
+  #c { position: fixed; inset: 0; display: block; z-index: 1; cursor: crosshair; touch-action: none; }
+  #top {
+    position: fixed; left: 26px; top: 22px; z-index: 3; color: #b9d4dd; pointer-events: none;
+  }
+  #top h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.06em; text-shadow: 0 0 8px #1ad7ff55; }
+  #top p { font-size: 11px; color: #5f8b99; margin-top: 4px; letter-spacing: 0.1em; }
+  #top .spec { color: #486d79; margin-top: 2px; }
+  #nav {
+    position: fixed; right: 16px; bottom: 20px; z-index: 4; display: flex; flex-direction: column;
+    gap: 1px; align-items: flex-end; font-size: 10.5px; letter-spacing: 0.16em;
+  }
+  #nav a { color: #6f9fae; text-decoration: none; padding: 3px 9px; border-right: 2px solid transparent; transition: color .2s ease, border-color .2s ease; }
+  #nav a:hover, #nav a.here { color: #cfeef6; border-color: #35c9e6; }
+  #hint { position: fixed; left: 26px; bottom: 22px; z-index: 3; color: #4f7885; font-size: 11px; letter-spacing: 0.1em; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="top"><h1>CONNECTOME</h1><p>// the menu is a neural cluster — light one up to travel</p><p class="spec" id="spec"></p></div>
+<nav id="nav">
+  <a href="index.html">CORTEX</a>
+  <a href="synapse.html" class="here">CONNECTOME</a>
+  <a href="pulse.html">LATENCY</a>
+  <a href="dive.html">DESCENT</a>
+</nav>
+<div id="hint">hover a cluster to ignite it &nbsp;·&nbsp; click to fire a spike and follow it</div>
+
+<script>
+(() => {
+"use strict";
+const cv = document.getElementById("c");
+const x = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function mulberry32(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const SEED = (() => {
+  const q = new URLSearchParams(location.search).get("seed");
+  if (q && /^[0-9a-z]+$/i.test(q)) return parseInt(q, 36) >>> 0;
+  let s = localStorage.getItem("nb_specimen");
+  if (!s) { s = (Math.random() * 4294967296 >>> 0).toString(36); localStorage.setItem("nb_specimen", s); }
+  return parseInt(s, 36) >>> 0;
+})();
+const SPECIMEN = SEED.toString(36).toUpperCase().padStart(6, "0").slice(-6);
+const rand = mulberry32(SEED ^ 0x9e3779b9);
+const specEl = document.getElementById("spec");
+if (specEl) {
+  specEl.textContent = "specimen #" + SPECIMEN;
+  const share = location.origin + location.pathname.replace(/[^/]+$/, "index.html") + "?seed=" + SEED.toString(36);
+  specEl.title = share;
+}
+
+const TARGETS = [
+  { label: "CORTEX",  sub: "the living brain",     href: "index.html",   fx: 0.28, fy: 0.40 },
+  { label: "LATENCY", sub: "measure your signal",  href: "pulse.html",   fx: 0.72, fy: 0.34 },
+  { label: "DESCENT", sub: "fall through the web", href: "dive.html",    fx: 0.66, fy: 0.70 },
+  { label: "DREAM",   sub: "let it wander",        href: "index.html?dream", fx: 0.32, fy: 0.72 },
+];
+
+let nodes = [];
+let links = [];
+let pulses = [];
+let ripples = 0;
+let hover = -1;
+let mx = -999, my = -999;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth || document.documentElement.clientWidth || 1280;
+  H = window.innerHeight || document.documentElement.clientHeight || 720;
+  cv.width = W * DPR; cv.height = H * DPR;
+  cv.style.width = W + "px"; cv.style.height = H + "px";
+  x.setTransform(DPR, 0, 0, DPR, 0, 0);
+  build();
+}
+window.addEventListener("resize", resize);
+
+function gauss() { return (Math.random() + Math.random() + Math.random() - 1.5) / 1.5; }
+
+function build() {
+  nodes = [];
+  // ambient field
+  const amb = Math.round((W * H) / 5400);
+  for (let i = 0; i < amb; i++) {
+    nodes.push({ x: Math.random() * W, y: Math.random() * H, hx: Math.random() * W, hy: Math.random() * H,
+      vx: 0, vy: 0, base: 0.05 + Math.random() * 0.12, act: 0, t: -1 });
+  }
+  // one cluster per target
+  TARGETS.forEach((tg, ti) => {
+    tg.cx = tg.fx * W; tg.cy = tg.fy * H;
+    tg.r = Math.min(W, H) * 0.085;
+    tg.hoverAmt = 0;
+    for (let i = 0; i < 46; i++) {
+      const a = Math.random() * 6.2832;
+      const rr = Math.pow(Math.random(), 0.7) * tg.r;
+      const px = tg.cx + Math.cos(a) * rr + gauss() * 6;
+      const py = tg.cy + Math.sin(a) * rr + gauss() * 6;
+      nodes.push({ x: px, y: py, hx: px, hy: py, vx: 0, vy: 0,
+        base: 0.10 + Math.random() * 0.18, act: 0, t: ti });
+    }
+  });
+  // links via spatial hash
+  links = [];
+  const cell = 46, grid = new Map();
+  const key = (a, b) => a + "," + b;
+  nodes.forEach((n, i) => {
+    const gx = (n.x / cell) | 0, gy = (n.y / cell) | 0;
+    const k = key(gx, gy);
+    (grid.get(k) || grid.set(k, []).get(k)).push(i);
+  });
+  nodes.forEach((n, i) => {
+    const gx = (n.x / cell) | 0, gy = (n.y / cell) | 0;
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const arr = grid.get(key(gx + dx, gy + dy)); if (!arr) continue;
+      for (const j of arr) {
+        if (j <= i) continue;
+        const d = Math.hypot(nodes[j].x - n.x, nodes[j].y - n.y);
+        if (d < 58 && Math.random() < 0.5) links.push([i, j, d]);
+      }
+    }
+  });
+}
+
+function igniteNode(i, e) {
+  const n = nodes[i]; if (!n) return;
+  n.act = Math.min(1.4, n.act + e);
+}
+function cascadeFrom(i, depth) {
+  if (depth <= 0) return;
+  for (const [a, b] of links) {
+    if (a === i && nodes[b].act < 0.5) { nodes[b].act = Math.min(1, nodes[b].act + 0.5); if (Math.random() < 0.4) cascadeFrom(b, depth - 1); }
+    else if (b === i && nodes[a].act < 0.5) { nodes[a].act = Math.min(1, nodes[a].act + 0.5); if (Math.random() < 0.4) cascadeFrom(a, depth - 1); }
+  }
+}
+
+cv.addEventListener("pointermove", (ev) => {
+  mx = ev.clientX; my = ev.clientY;
+  hover = -1; let bd = 1e9;
+  TARGETS.forEach((tg, i) => {
+    const d = Math.hypot(mx - tg.cx, my - tg.cy);
+    if (d < tg.r * 1.5 && d < bd) { bd = d; hover = i; }
+  });
+  cv.style.cursor = hover >= 0 ? "pointer" : "crosshair";
+});
+cv.addEventListener("pointerleave", () => { hover = -1; mx = my = -999; });
+cv.addEventListener("pointerdown", (ev) => {
+  const cx = ev.clientX, cy = ev.clientY;
+  let hit = -1, bd = 1e9;
+  TARGETS.forEach((tg, i) => {
+    const d = Math.hypot(cx - tg.cx, cy - tg.cy);
+    if (d < tg.r * 1.5 && d < bd) { bd = d; hit = i; }
+  });
+  if (hit >= 0) {
+    pulses.push({ x0: cx, y0: cy, tg: hit, t: 0, nav: true });
+  } else {
+    // just a local ripple
+    let bn = -1, dd = 1e9;
+    nodes.forEach((n, i) => { const d = Math.hypot(n.x - cx, n.y - cy); if (d < dd) { dd = d; bn = i; } });
+    if (bn >= 0) { igniteNode(bn, 1); cascadeFrom(bn, 3); }
+  }
+});
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+  last = now;
+
+  // spontaneous ripples
+  ripples -= dt;
+  if (ripples <= 0) {
+    ripples = (REDUCED ? 3.6 : 1.1) + Math.random() * (REDUCED ? 2.4 : 1.8);
+    const i = (Math.random() * nodes.length) | 0;
+    igniteNode(i, 1); cascadeFrom(i, REDUCED ? 1 : 2);
+  }
+
+  // hover ignition
+  TARGETS.forEach((tg, ti) => {
+    const goal = hover === ti ? 1 : 0;
+    tg.hoverAmt += (goal - tg.hoverAmt) * Math.min(1, dt * 6);
+    if (hover === ti && Math.random() < (REDUCED ? 0.18 : 0.5)) {
+      // ignite a random node of this cluster
+      const pool = [];
+      for (let i = 0; i < nodes.length; i++) if (nodes[i].t === ti) pool.push(i);
+      if (pool.length) { const i = pool[(Math.random() * pool.length) | 0]; nodes[i].act = Math.min(1.3, nodes[i].act + 0.35); }
+    }
+  });
+
+  // integrate node motion + decay
+  const jit = REDUCED ? 0 : 0.06;
+  for (const n of nodes) {
+    n.x += (n.hx - n.x) * 0.02 + Math.sin(now * 0.0005 + n.hx) * jit;
+    n.y += (n.hy - n.y) * 0.02 + Math.cos(now * 0.0005 + n.hy) * jit;
+    n.act *= (1 - dt * 2.2);
+    if (n.act < 0.001) n.act = 0;
+  }
+
+  // pulses
+  for (let i = pulses.length - 1; i >= 0; i--) {
+    const p = pulses[i];
+    p.t += dt / 0.55;
+    if (p.t >= 1) {
+      const tg = TARGETS[p.tg];
+      for (let k = 0; k < nodes.length; k++) if (nodes[k].t === p.tg) nodes[k].act = 1.3;
+      pulses.splice(i, 1);
+      if (p.nav) setTimeout(() => (location.href = tg.href), 160);
+    }
+  }
+
+  draw(now);
+  requestAnimationFrame(frame);
+}
+
+function draw(now) {
+  x.fillStyle = "#05060b";
+  x.fillRect(0, 0, W, H);
+
+  // links
+  x.lineWidth = 1;
+  for (const [a, b] of links) {
+    const na = nodes[a], nb = nodes[b];
+    const e = Math.max(na.act, nb.act);
+    const al = 0.03 + e * 0.35;
+    if (al < 0.035) continue;
+    x.strokeStyle = "rgba(130,205,225," + al.toFixed(3) + ")";
+    x.beginPath(); x.moveTo(na.x, na.y); x.lineTo(nb.x, nb.y); x.stroke();
+  }
+
+  // nodes
+  for (const n of nodes) {
+    const g = n.base + n.act * 1.1;
+    const rad = 1.1 + g * 2.6;
+    const col = n.act > 0.02
+      ? "rgba(" + (120 + n.act * 130 | 0) + "," + (200 + n.act * 45 | 0) + ",240," + Math.min(1, 0.25 + g).toFixed(3) + ")"
+      : "rgba(70,150,170," + Math.min(0.5, 0.12 + g).toFixed(3) + ")";
+    x.fillStyle = col;
+    x.beginPath(); x.arc(n.x, n.y, rad, 0, 6.2832); x.fill();
+  }
+
+  // target labels
+  x.textAlign = "center";
+  TARGETS.forEach((tg) => {
+    const h = tg.hoverAmt;
+    x.font = "700 " + (13 + h * 3).toFixed(1) + "px 'SFMono-Regular', ui-monospace, monospace";
+    x.fillStyle = "rgba(" + (110 + h * 150 | 0) + "," + (160 + h * 80 | 0) + "," + (180 + h * 70 | 0) + "," + (0.5 + h * 0.5).toFixed(2) + ")";
+    x.fillText(tg.label, tg.cx, tg.cy + tg.r + 22);
+    if (h > 0.05) {
+      x.font = "500 10px 'SFMono-Regular', ui-monospace, monospace";
+      x.fillStyle = "rgba(150,200,215," + (h * 0.7).toFixed(2) + ")";
+      x.fillText(tg.sub, tg.cx, tg.cy + tg.r + 38);
+      // ring
+      x.strokeStyle = "rgba(90,210,235," + (h * 0.4).toFixed(2) + ")";
+      x.lineWidth = 1;
+      x.beginPath(); x.arc(tg.cx, tg.cy, tg.r * (1.15 + 0.06 * Math.sin(now * 0.004)), 0, 6.2832); x.stroke();
+    }
+  });
+
+  // travelling pulses
+  for (const p of pulses) {
+    const tg = TARGETS[p.tg];
+    const mxp = p.x0 + (tg.cx - p.x0) * p.t;
+    const myp = p.y0 + (tg.cy - p.y0) * p.t - Math.sin(p.t * Math.PI) * 40;
+    x.fillStyle = "rgba(210,240,250,0.95)";
+    x.beginPath(); x.arc(mxp, myp, 3.4, 0, 6.2832); x.fill();
+    x.strokeStyle = "rgba(150,220,240,0.25)";
+    x.beginPath(); x.moveTo(p.x0, p.y0); x.lineTo(mxp, myp); x.stroke();
+  }
+}
+
+resize();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

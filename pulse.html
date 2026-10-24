@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#05070a" />
+<meta name="description" content="NEUROBYTE latency — flash-to-tap reaction test: how many milliseconds of signal delay are you carrying?" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2305060b'/%3E%3Cg stroke='%2335c9e6' stroke-width='1.4' fill='none'%3E%3Cline x1='16' y1='16' x2='4' y2='7'/%3E%3Cline x1='16' y1='16' x2='28' y2='6'/%3E%3Cline x1='16' y1='16' x2='27' y2='24'/%3E%3Cline x1='16' y1='16' x2='6' y2='26'/%3E%3Cline x1='16' y1='16' x2='16' y2='30'/%3E%3C/g%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%2382e6ff'/%3E%3C/svg%3E" />
+<title>NEUROBYTE — latency</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #05070a; }
+  body { font-family: "SFMono-Regular", ui-monospace, "Courier New", monospace; color: #9fc7c0; -webkit-font-smoothing: antialiased; }
+  #c { position: fixed; inset: 0; display: block; z-index: 1; touch-action: none; }
+  #top { position: fixed; left: 26px; top: 22px; z-index: 3; pointer-events: none; }
+  #top h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.06em; color: #cfeee6; text-shadow: 0 0 8px #2fe0c055; }
+  #top p { font-size: 11px; color: #567f78; margin-top: 4px; letter-spacing: 0.1em; }
+  #top .spec { color: #45685f; margin-top: 2px; }
+  #nav { position: fixed; right: 16px; bottom: 20px; z-index: 4; display: flex; flex-direction: column; gap: 1px; align-items: flex-end; font-size: 10.5px; letter-spacing: 0.16em; }
+  #nav a { color: #6f9fae; text-decoration: none; padding: 3px 9px; border-right: 2px solid transparent; transition: color .2s ease, border-color .2s ease; }
+  #nav a:hover, #nav a.here { color: #cfeef6; border-color: #35c9e6; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="top"><h1>LATENCY</h1><p>// stimulus → response. how many milliseconds of you is there?</p><p class="spec" id="spec"></p></div>
+<nav id="nav">
+  <a href="index.html">CORTEX</a>
+  <a href="synapse.html">CONNECTOME</a>
+  <a href="pulse.html" class="here">LATENCY</a>
+  <a href="dive.html">DESCENT</a>
+</nav>
+
+<script>
+(() => {
+"use strict";
+const cv = document.getElementById("c");
+const x = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const SEED = (() => {
+  const q = new URLSearchParams(location.search).get("seed");
+  if (q && /^[0-9a-z]+$/i.test(q)) return parseInt(q, 36) >>> 0;
+  let s = localStorage.getItem("nb_specimen");
+  if (!s) { s = (Math.random() * 4294967296 >>> 0).toString(36); localStorage.setItem("nb_specimen", s); }
+  return parseInt(s, 36) >>> 0;
+})();
+const SPECIMEN = SEED.toString(36).toUpperCase().padStart(6, "0").slice(-6);
+const specEl = document.getElementById("spec");
+if (specEl) specEl.textContent = "specimen #" + SPECIMEN;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth || document.documentElement.clientWidth || 1280;
+  H = window.innerHeight || document.documentElement.clientHeight || 720;
+  cv.width = W * DPR; cv.height = H * DPR;
+  cv.style.width = W + "px"; cv.style.height = H + "px";
+  x.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener("resize", resize);
+
+// state: idle | armed | go | result | early
+let state = "idle";
+let armAt = 0, goAt = 0, rt = 0;
+let history = JSON.parse(localStorage.getItem("nb_latency") || "[]");
+let flashT = 0;
+let msg = "click anywhere or press SPACE to begin";
+
+const COMPARE = [
+  [120, "quicker than a blink (~100–150 ms). barely."],
+  [160, "about one human blink of delay."],
+  [200, "roughly a sprinter reacting to the gun."],
+  [260, "a relaxed nervous system. caffeine?"],
+  [350, "your axons took the scenic route."],
+  [1e9, "were you asleep? try again."],
+];
+
+function arm() {
+  state = "armed";
+  armAt = performance.now();
+  goAt = armAt + 1200 + Math.random() * 2600;
+  msg = "wait for the neuron to fire…";
+}
+function fire() { state = "go"; goAt = performance.now(); flashT = 1; msg = "NOW"; }
+function respond() {
+  rt = performance.now() - goAt;
+  state = "result";
+  history.push(Math.round(rt));
+  if (history.length > 60) history.shift();
+  localStorage.setItem("nb_latency", JSON.stringify(history));
+  let c = COMPARE[COMPARE.length - 1][1];
+  for (const [th, t] of COMPARE) { if (rt < th) { c = t; break; } }
+  const bytes = (rt * 86000 / 1000).toFixed(0); // playful "neurobytes"
+  msg = Math.round(rt) + " ms   ·   " + c + "   ·   ~" + Number(bytes).toLocaleString() + " neurobytes en route";
+}
+function trigger() {
+  if (state === "idle" || state === "result" || state === "early") arm();
+  else if (state === "armed") { state = "early"; msg = "too soon — you fired before the stimulus. reset."; }
+  else if (state === "go") respond();
+}
+addEventListener("pointerdown", trigger);
+addEventListener("keydown", (e) => {
+  if (e.code === "Space") { e.preventDefault(); trigger(); }
+  else if (e.key.toLowerCase() === "x") { history = []; localStorage.removeItem("nb_latency"); msg = "history cleared — click or SPACE to begin"; state = "idle"; }
+});
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+  last = now;
+  if (state === "armed" && now >= goAt) fire();
+  flashT *= (1 - dt * 3.5);
+
+  x.fillStyle = "#05070a";
+  x.fillRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2 - 20;
+
+  // dendrites
+  const lit = state === "go" ? 1 : 0;
+  const glow = Math.max(lit, flashT);
+  x.lineWidth = 1.4;
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * 6.2832 + (REDUCED ? 0 : now * 0.0002);
+    const r1 = 42, r2 = 150 + (REDUCED ? 0 : 18 * Math.sin(now * 0.001 + i));
+    x.strokeStyle = "rgba(90,190,175," + (0.08 + glow * 0.5).toFixed(3) + ")";
+    x.beginPath();
+    x.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    x.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    x.stroke();
+  }
+  // soma
+  const R = 40 + glow * 10;
+  const grad = x.createRadialGradient(cx, cy, 2, cx, cy, R);
+  if (glow > 0.02) {
+    grad.addColorStop(0, "rgba(210,255,245," + (0.6 + glow * 0.4).toFixed(3) + ")");
+    grad.addColorStop(1, "rgba(60,200,175,0)");
+  } else {
+    grad.addColorStop(0, "rgba(70,150,150,0.5)");
+    grad.addColorStop(1, "rgba(40,90,95,0)");
+  }
+  x.fillStyle = grad;
+  x.beginPath(); x.arc(cx, cy, R, 0, 6.2832); x.fill();
+  x.strokeStyle = state === "armed" ? "rgba(150,120,90,0.6)" : "rgba(110,200,190,0.5)";
+  x.lineWidth = 1.5;
+  x.beginPath(); x.arc(cx, cy, 40, 0, 6.2832); x.stroke();
+
+  // message
+  x.textAlign = "center";
+  x.font = "500 13px 'SFMono-Regular', ui-monospace, monospace";
+  x.fillStyle = state === "early" ? "#d98a6a" : "#a9d7cf";
+  x.fillText(msg, cx, cy + 130);
+
+  // oscilloscope
+  const oy = H - 120, ow = Math.min(W - 80, 900), ox = (W - ow) / 2, oh = 78;
+  x.strokeStyle = "rgba(70,120,115,0.25)";
+  x.lineWidth = 1;
+  x.strokeRect(ox, oy, ow, oh);
+  x.beginPath(); x.moveTo(ox, oy + oh / 2); x.lineTo(ox + ow, oy + oh / 2); x.stroke();
+  if (history.length) {
+    const lo = 100, hi = 500;
+    const map = (v) => oy + oh - ((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo)) * oh;
+    x.strokeStyle = "#3ea88c"; x.shadowColor = "#3ea88c"; x.shadowBlur = 3; x.lineWidth = 1.6;
+    x.beginPath();
+    history.forEach((v, i) => {
+      const px = ox + (i / Math.max(1, history.length - 1)) * ow;
+      i === 0 ? x.moveTo(px, map(v)) : x.lineTo(px, map(v));
+    });
+    x.stroke(); x.shadowBlur = 0;
+    history.forEach((v, i) => {
+      const px = ox + (i / Math.max(1, history.length - 1)) * ow;
+      x.fillStyle = "rgba(180,230,220,0.7)";
+      x.beginPath(); x.arc(px, map(v), 1.8, 0, 6.2832); x.fill();
+    });
+    const best = Math.min(...history);
+    const mean = history.reduce((a, b) => a + b, 0) / history.length;
+    const vel = (100000 / mean).toFixed(1); // fake conduction velocity m/s
+    x.textAlign = "left";
+    x.font = "500 11px 'SFMono-Regular', ui-monospace, monospace";
+    x.fillStyle = "#6f9fae";
+    x.fillText("n " + history.length + "   best " + best + " ms   mean " + mean.toFixed(0) + " ms   ~" + vel + " m/s conduction   ·   [x] clear", ox, oy - 10);
+  }
+
+  requestAnimationFrame(frame);
+}
+resize();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
